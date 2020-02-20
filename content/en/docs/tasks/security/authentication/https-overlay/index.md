@@ -38,14 +38,14 @@ You need to have openssl installed to run these commands:
 {{< text bash >}}
 $ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /tmp/nginx.key -out /tmp/nginx.crt -subj "/CN=my-nginx/O=my-nginx"
 $ kubectl create secret tls nginxsecret --key /tmp/nginx.key --cert /tmp/nginx.crt
-secret "nginxsecret" created
+secret/nginxsecret created
 {{< /text >}}
 
 Create a configmap used for the HTTPS service
 
 {{< text bash >}}
 $ kubectl create configmap nginxconfigmap --from-file=samples/https/default.conf
-configmap "nginxconfigmap" created
+configmap/nginxconfigmap created
 {{< /text >}}
 
 ## Deploy an HTTPS service without the Istio sidecar
@@ -54,14 +54,17 @@ This section creates a NGINX-based HTTPS service.
 
 {{< text bash >}}
 $ kubectl apply -f @samples/https/nginx-app.yaml@
-service "my-nginx" created
-replicationcontroller "my-nginx" created
+service/my-nginx created
+replicationcontroller/my-nginx created
 {{< /text >}}
 
 Then, create another pod to call this service.
 
 {{< text bash >}}
 $ kubectl apply -f <(istioctl kube-inject -f @samples/sleep/sleep.yaml@)
+serviceaccount/sleep created
+service/sleep created
+deployment.apps/sleep created
 {{< /text >}}
 
 Get the pods
@@ -82,8 +85,7 @@ $ kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.
 Call my-nginx
 
 {{< text bash >}}
-$ curl https://my-nginx -k
-...
+$ curl -s https://my-nginx -k
 <h1>Welcome to nginx!</h1>
 ...
 {{< /text >}}
@@ -91,8 +93,7 @@ $ curl https://my-nginx -k
 You can actually combine the above three command into one:
 
 {{< text bash >}}
-$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c istio-proxy -- curl https://my-nginx -k
-...
+$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c istio-proxy -- curl -s https://my-nginx -k
 <h1>Welcome to nginx!</h1>
 ...
 {{< /text >}}
@@ -106,12 +107,16 @@ Delete the HTTPS service.
 
 {{< text bash >}}
 $ kubectl delete -f @samples/https/nginx-app.yaml@
+service/my-nginx deleted
+replicationcontroller/my-nginx deleted
 {{< /text >}}
 
 Deploy it with a sidecar
 
 {{< text bash >}}
 $ kubectl apply -f <(istioctl kube-inject -f @samples/https/nginx-app.yaml@)
+service/my-nginx created
+replicationcontroller/my-nginx created
 {{< /text >}}
 
 Make sure the pod is up and running
@@ -126,8 +131,7 @@ sleep-847544bbfc-d27jg            2/2       Running   0          18h
 And run
 
 {{< text bash >}}
-$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c sleep -- curl https://my-nginx -k
-...
+$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c sleep -- curl -s https://my-nginx -k
 <h1>Welcome to nginx!</h1>
 ...
 {{< /text >}}
@@ -135,8 +139,7 @@ $ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name
 If you run from the `istio-proxy` container, it should work as well:
 
 {{< text bash >}}
-$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c istio-proxy -- curl https://my-nginx -k
-...
+$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c istio-proxy -- curl -s https://my-nginx -k
 <h1>Welcome to nginx!</h1>
 ...
 {{< /text >}}
@@ -165,7 +168,7 @@ No resources found.
 Install Istio with the **strict mutual TLS mode** enabled:
 
 {{< text bash >}}
-$ istioctl manifest apply --set profile=demo,values.global.controlPlaneSecurityEnabled=true,values.global.mtls.enabled=true
+$ istioctl manifest apply --set profile=demo --set values.global.controlPlaneSecurityEnabled=true --set values.global.mtls.enabled=true
 {{< /text >}}
 
 Make sure everything is up and running:
@@ -173,31 +176,37 @@ Make sure everything is up and running:
 {{< text bash >}}
 $ kubectl get po -n istio-system
 NAME                                       READY     STATUS      RESTARTS   AGE
-grafana-6f6dff9986-r6xnq                   1/1       Running     0          23h
-istio-citadel-599f7cbd46-85mtq             1/1       Running     0          1h
-istio-cleanup-old-ca-mcq94                 0/1       Completed   0          23h
 istio-egressgateway-78dd788b6d-jfcq5       1/1       Running     0          23h
 istio-ingressgateway-7dd84b68d6-dxf28      1/1       Running     0          23h
-istio-mixer-post-install-g8n9d             0/1       Completed   0          23h
-istio-pilot-d5bbc5c59-6lws4                2/2       Running     0          23h
-istio-policy-64595c6fff-svs6v              2/2       Running     0          23h
-istio-sidecar-injector-645c89bc64-h2dnx    1/1       Running     0          23h
-istio-statsd-prom-bridge-949999c4c-mv8qt   1/1       Running     0          23h
-istio-telemetry-cfb674b6c-rgdhb            2/2       Running     0          23h
-istio-tracing-754cdfd695-wqwr4             1/1       Running     0          23h
+istiod-d5bbc5c59-6lws4                     2/2       Running     0          23h
 prometheus-86cb6dd77c-ntw88                1/1       Running     0          23h
 {{< /text >}}
 
-Then redeploy the HTTPS service and sleep service
+Then delete the HTTPS service and sleep service
 
 {{< text bash >}}
 $ kubectl delete -f <(istioctl kube-inject -f @samples/sleep/sleep.yaml@)
-$ kubectl apply -f <(istioctl kube-inject -f @samples/sleep/sleep.yaml@)
 $ kubectl delete -f <(istioctl kube-inject -f @samples/https/nginx-app.yaml@)
-$ kubectl apply -f <(istioctl kube-inject -f @samples/https/nginx-app.yaml@)
+service "sleep" deleted
+service "my-nginx" deleted
 {{< /text >}}
 
-Make sure the pod is up and running
+and re-create them with sidecars injected
+
+{{< text bash >}}
+$ kubectl apply -f <(istioctl kube-inject -f @samples/sleep/sleep.yaml@)
+serviceaccount/sleep created
+service/sleep created
+{{< /text >}}
+
+{{< text bash >}}
+$ kubectl apply -f <(istioctl kube-inject -f @samples/https/nginx-app.yaml@)
+deployment.apps/sleep created
+service/my-nginx created
+replicationcontroller/my-nginx created
+{{< /text >}}
+
+Make sure the pods are up and running
 
 {{< text bash >}}
 $ kubectl get pod
@@ -209,8 +218,7 @@ sleep-77f457bfdd-hdknx            2/2       Running   0          18h
 And run
 
 {{< text bash >}}
-$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c sleep -- curl https://my-nginx -k
-...
+$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c sleep -- curl -s https://my-nginx -k
 <h1>Welcome to nginx!</h1>
 ...
 {{< /text >}}
@@ -222,7 +230,7 @@ and `nginx-proxy`. In this case, everything works fine.
 However, if you run this command from the `istio-proxy` container, it will not work:
 
 {{< text bash >}}
-$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c istio-proxy -- curl https://my-nginx -k
+$ kubectl exec $(kubectl get pod -l app=sleep -o jsonpath={.items..metadata.name}) -c istio-proxy -- curl -s https://my-nginx -k
 curl: (35) gnutls_handshake() failed: Handshake failed
 command terminated with exit code 35
 {{< /text >}}
@@ -240,4 +248,6 @@ $ kubectl delete -f @samples/sleep/sleep.yaml@
 $ kubectl delete -f @samples/https/nginx-app.yaml@
 $ kubectl delete configmap nginxconfigmap
 $ kubectl delete secret nginxsecret
+$ rm /tmp/nginx.key
+$ rm /tmp/nginx.crt
 {{< /text >}}
